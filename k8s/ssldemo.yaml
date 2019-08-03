@@ -1,0 +1,159 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: ssldemo
+  labels:
+    name: ssldemo
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: depends-on-role
+  namespace: ssldemo
+rules:
+- apiGroups: ["batch", "apps", ""]
+  resources: ["pods", "services", "jobs"]
+  verbs: ["get", "list", "watch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: depends-on-role-binding
+  namespace: ssldemo
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: ssldemo
+roleRef:
+  kind: Role
+  name: depends-on-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: certmanager.k8s.io/v1alpha1
+kind: Certificate
+metadata:
+  name: darkedges-local
+  namespace: ssldemo
+spec:
+  secretName: darkedges-local-tls
+  issuerRef:
+    name: ca-issuer
+    kind: ClusterIssuer
+  commonName: ssldemo.svc.cluster.local
+  organization:
+  - DarkEdges
+  dnsNames:
+  - "*.ssldemo.svc.cluster.local"
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: keystore-pv-volume
+  namespace: ssldemo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: createkeystore
+  namespace: ssldemo
+spec:
+  template:
+    spec:
+      containers:
+      - name: create-keystore-configmap
+        image: darkedges/8_server-jre_unlimited:8u211
+        env:
+          - name: password
+            value: changeit
+        command:
+          - /bin/bash
+        args:
+          - "-c"
+          - "openssl pkcs12 -export -inkey /etc/secret-volume/tls.key -in /etc/secret-volume/tls.crt -out /keystores/keystore.p12 -password pass:$password && keytool -importkeystore -noprompt -srckeystore /keystores/keystore.p12 -srcstoretype pkcs12 -destkeystore /keystores/keystore.jks -storepass $password -srcstorepass $password && rm -rf /keystores/keystore.p12"
+        volumeMounts:
+          - name: keystore-pv-volume
+            mountPath: /keystores
+          - name: secret-volume
+            mountPath: /etc/secret-volume
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: darkedges-local-tls
+        - name: keystore-pv-volume
+          persistentVolumeClaim:
+            claimName: keystore-pv-volume
+      restartPolicy: Never
+  backoffLimit: 4
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ssldemo
+  namespace: ssldemo
+spec:
+  selector:
+    matchLabels:
+      app: ssldemo
+  replicas: 2
+  serviceName: ssldemo
+  template:
+    metadata:
+      labels:
+        app: ssldemo
+    spec:
+      initContainers:
+        - name: wait-for-keystore
+          image: opsfleet/depends-on
+          args:
+          - "-job=createkeystore"
+      containers:
+      - name: ssldemo
+        image: darkedges/ssldemo:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: password
+            value: changeit
+          - name: keystore_jks
+            value: /keystores/keystore.jks
+        ports:
+          - containerPort: 8443
+        volumeMounts:
+          - name: keystore-pv-volume
+            mountPath: /keystores
+        readinessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+        - name: keystore-pv-volume
+          persistentVolumeClaim:
+            claimName: keystore-pv-volume
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ssldemo-lb
+  namespace: ssldemo
+  labels:
+    app: ssldemo
+spec:
+  type: LoadBalancer
+  selector:
+    app: ssldemo
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+      protocol: TCP

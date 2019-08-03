@@ -64,6 +64,14 @@ kubectl logs ssldemo-0 -n ssldemo -f
 2019-08-03 04:00:03.748  INFO 1 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8443 (https) with context path '' 2019-08-03 04:00:03.764  INFO 1 --- [           main] c.d.s.k8s.ssldemo.SSLDemoApplication     : Started SSLDemoApplication in 10.367 seconds (JVM running for 11.47)
 ```
 
+### Get Service Details
+
+```bash
+kubectl get services -n ssldemo
+NAME         TYPE           CLUSTER-IP       EXTERNAL-IP     PORT(S)         AGE
+ssldemo-lb   LoadBalancer   10.104.192.202   192.168.99.99   443:31077/TCP   2m18s
+```
+
 ### Get Certificate Details
 
 ```bash

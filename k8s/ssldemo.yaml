@@ -69,13 +69,16 @@ spec:
       - name: create-keystore-configmap
         image: darkedges/8_server-jre_unlimited:8u211
         env:
-          - name: password
+          - name: keystore_password
+            value: changeit
+          - name: truststore_password
             value: changeit
         command:
           - /bin/bash
         args:
+          - "-eux"
           - "-c"
-          - "openssl pkcs12 -export -inkey /etc/secret-volume/tls.key -in /etc/secret-volume/tls.crt -out /keystores/keystore.p12 -password pass:$password && keytool -importkeystore -noprompt -srckeystore /keystores/keystore.p12 -srcstoretype pkcs12 -destkeystore /keystores/keystore.jks -storepass $password -srcstorepass $password && rm -rf /keystores/keystore.p12"
+          - "openssl pkcs12 -export -inkey /etc/secret-volume/tls.key -in /etc/secret-volume/tls.crt -out /keystores/keystore.p12 -password pass:$keystore_password && keytool -importkeystore -noprompt -srckeystore /keystores/keystore.p12 -srcstoretype pkcs12 -destkeystore /keystores/keystore.jks -storepass $keystore_password -srcstorepass $keystore_password && csplit -z -f crt /etc/secret-volume/ca.crt '/-----BEGIN CERTIFICATE-----/' '{*}' && for file in crt*; do keytool -import -trustcacerts -noprompt -keystore /keystores/truststore.jks -file $file -storepass $truststore_password -alias service$file; done && rm -rf /keystores/keystore.p12"
         volumeMounts:
           - name: keystore-pv-volume
             mountPath: /keystores
